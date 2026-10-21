@@ -1,9 +1,10 @@
 {
   "name": "qwq-editor",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "qwq-language",
   "type": "module",
+  "license": "MIT",
   "scripts": {
     "build:wasm": "node scripts/ensure-wasm.cjs full",
     "build:wasm:source": "node scripts/run-platform-script.cjs build-wasm",
@@ -16,7 +17,8 @@
     "build:pages": "npm run build:wasm && vite build --mode pages",
     "preelectron:dev": "npm run build:analysis-wasm",
     "electron:dev": "node scripts/electron-dev.cjs",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "wasm:version": "node scripts/wasm-version.cjs"
   },
   "main": "electron/main.cjs",
   "desktopName": "qwq-editor",

@@ -10,7 +10,11 @@ function callStringFunction(module, name, args) {
 
 const corePromise = createQwqModule()
   .then((module) => {
-    self.postMessage({ type: "ready" });
+    let version = "";
+    try {
+      version = module.ccall("qwq_version", "string", [], []);
+    } catch {}
+    self.postMessage({ type: "ready", version });
     return module;
   })
   .catch((error) => {

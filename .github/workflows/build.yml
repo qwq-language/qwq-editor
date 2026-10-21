@@ -8,7 +8,7 @@ on:
     branches: [main]
   workflow_dispatch:
   schedule:
-    - cron: "17 4 * * *"
+    - cron: "0 4 * * *"
 
 permissions:
   contents: read
@@ -57,6 +57,16 @@ jobs:
       - name: Install editor dependencies
         run: npm ci
 
+      - name: Read committed WASM version
+        id: committed
+        shell: bash
+        run: |
+          version=""
+          if [[ -f src/wasm/qwq.wasm ]]; then
+            version="$(node scripts/wasm-version.cjs src/wasm 2>/dev/null || true)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Build analysis-only WASM for desktop
         run: npm run build:analysis-wasm:source
         env:
@@ -66,6 +76,20 @@ jobs:
         run: npm run build:wasm:source
         env:
           QWQ_ROOT_DIR: ${{ github.workspace }}/qwqwq-source
+
+      - name: Warn when the committed WASM snapshot is behind upstream
+        shell: bash
+        env:
+          COMMITTED_VERSION: ${{ steps.committed.outputs.version }}
+          UPSTREAM_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if [[ -z "$COMMITTED_VERSION" ]]; then
+            echo "::warning::The committed WASM snapshot does not report a version. Rebuild it with QWQ_REBUILD_WASM=1 and commit src/wasm and src/wasm-analysis."
+          elif [[ "$COMMITTED_VERSION" != "$UPSTREAM_VERSION" ]]; then
+            echo "::warning::Committed WASM reports qwqwq $COMMITTED_VERSION but upstream main is $UPSTREAM_VERSION. Pages and the installers use $UPSTREAM_VERSION; rebuild the committed snapshot with QWQ_REBUILD_WASM=1 so local builds are not stale."
+          else
+            echo "Committed WASM matches upstream main ($UPSTREAM_VERSION)."
+          fi
 
       - name: Stage WASM assets
         shell: bash

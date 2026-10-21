@@ -33,10 +33,10 @@ set "SOURCES="%WEB_DIR%\wasm\bridge.cpp" "%WEB_DIR%\wasm\provenance.cpp" "%ROOT_
 set "MODE_FLAG="
 if "%QWQ_ANALYZE_ONLY%"=="1" (
   set "MODE_FLAG=-DQWQ_ANALYZE_ONLY"
-  set "EXPORTED_FUNCTIONS=['_qwq_analyze','_qwq_format','_qwq_free']"
+  set "EXPORTED_FUNCTIONS=['_qwq_version','_qwq_analyze','_qwq_format','_qwq_free']"
 ) else (
   set "SOURCES=%SOURCES% "%ROOT_DIR%\src\interpreter.cpp""
-  set "EXPORTED_FUNCTIONS=['_qwq_analyze','_qwq_format','_qwq_run','_qwq_free']"
+  set "EXPORTED_FUNCTIONS=['_qwq_version','_qwq_analyze','_qwq_format','_qwq_run','_qwq_free']"
 )
 
 em++ %SOURCES% %MODE_FLAG% ^
@@ -59,6 +59,7 @@ em++ %SOURCES% %MODE_FLAG% ^
 if errorlevel 1 goto :build_failed
 
 echo Built %OUTPUT_DIR%\qwq.js
+if exist "%SCRIPT_DIR%write-wasm-version.cjs" node "%SCRIPT_DIR%write-wasm-version.cjs" "%ROOT_DIR%" "%OUTPUT_DIR%"
 popd
 exit /b 0
 

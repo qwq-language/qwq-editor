@@ -118,6 +118,46 @@ function isExecutable(filePath) {
   }
 }
 
+function readRuntimeVersion(executable) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(executable, ["--version"], {
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      });
+    } catch {
+      resolve("");
+      return;
+    }
+
+    let output = "";
+    let settled = false;
+    let timer = null;
+    const finish = (version) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(version);
+    };
+    timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {}
+      finish("");
+    }, 4000);
+
+    child.stdout?.on("data", (chunk) => {
+      if (output.length < 4096) output += chunk.toString();
+    });
+    child.once("error", () => finish(""));
+    child.once("close", () => {
+      const match = output.match(/\b(\d+\.\d+\.\d+[\w.+-]*)/);
+      finish(match ? match[1] : "");
+    });
+  });
+}
+
 async function resolveRuntimePath() {
   const savedPath = await readSavedRuntimePath();
   const directCandidates = [process.env.QWQWQ_PATH, savedPath].filter(Boolean);
@@ -513,6 +553,13 @@ ipcMain.on("qwq:run-stop", (event, payload = {}) => {
 ipcMain.handle("qwq:get-runtime-path", async (event) => {
   if (getWindowForSender(event.sender) !== mainWindow) throw new Error("Invalid editor window.");
   return (await resolveRuntimePath()) ?? "";
+});
+
+ipcMain.handle("qwq:get-runtime-version", async (event) => {
+  if (getWindowForSender(event.sender) !== mainWindow) throw new Error("Invalid editor window.");
+  const executable = await resolveRuntimePath();
+  if (!executable) return "";
+  return await readRuntimeVersion(executable);
 });
 
 ipcMain.handle("qwq:choose-runtime", async (event) => {

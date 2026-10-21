@@ -45,10 +45,10 @@ SOURCES=(
 MODE_FLAGS=()
 if [[ "${QWQ_ANALYZE_ONLY:-0}" == "1" ]]; then
   MODE_FLAGS+=(-DQWQ_ANALYZE_ONLY)
-  EXPORTED_FUNCTIONS='["_qwq_analyze","_qwq_format","_qwq_free"]'
+  EXPORTED_FUNCTIONS='["_qwq_version","_qwq_analyze","_qwq_format","_qwq_free"]'
 else
   SOURCES+=("$ROOT_DIR/src/interpreter.cpp")
-  EXPORTED_FUNCTIONS='["_qwq_analyze","_qwq_format","_qwq_run","_qwq_free"]'
+  EXPORTED_FUNCTIONS='["_qwq_version","_qwq_analyze","_qwq_format","_qwq_run","_qwq_free"]'
 fi
 
 em++ "${SOURCES[@]}" "${MODE_FLAGS[@]}" \
@@ -70,3 +70,7 @@ em++ "${SOURCES[@]}" "${MODE_FLAGS[@]}" \
   -s FILESYSTEM=0
 
 printf 'Built %s\n' "$OUTPUT_DIR/qwq.js"
+
+if [[ -f "$SCRIPT_DIR/write-wasm-version.cjs" ]]; then
+  node "$SCRIPT_DIR/write-wasm-version.cjs" "$ROOT_DIR" "$OUTPUT_DIR"
+fi

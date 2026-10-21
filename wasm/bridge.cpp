@@ -13,6 +13,7 @@
 #include "lexer.hpp"
 #include "parser.hpp"
 #include "provenance.hpp"
+#include "version.hpp"
 
 namespace {
 
@@ -250,6 +251,8 @@ extern "C" char* qwq_analyze(const char* input) {
          << provenanceJson(provenance) << '}';
   return copyString(output.str());
 }
+
+extern "C" const char* qwq_version() { return qwq::kVersion; }
 
 extern "C" char* qwq_format(const char* input) {
   try {

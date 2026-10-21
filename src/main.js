@@ -1,4 +1,5 @@
 import "./monaco-worker.js";
+import { version as editorVersion } from "../package.json";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -174,6 +175,10 @@ document.querySelector("#app").innerHTML = `
         <p class="setting-help" id="system-terminal-note">Native key behavior applies: Ctrl+C interrupts. Ctrl+Z suspends on macOS/Linux (resume with <code>fg</code>); use Ctrl+D for EOF. On Windows, Ctrl+Z then Enter sends EOF.</p>
         <p class="setting-help" id="web-terminal-note" hidden>Web builds always use the embedded terminal.</p>
       </fieldset>
+      <div class="version-line">
+        <span id="editor-version-label">qwq-editor</span>
+        <span id="runtime-version-label" hidden></span>
+      </div>
       <div class="dialog-actions">
         <button class="secondary-button" id="reset-settings" type="button">Reset to defaults</button>
         <button class="primary-button" id="settings-done" type="submit">Done</button>
@@ -217,6 +222,9 @@ const systemTerminalRadio = document.querySelector('input[name="terminal-mode"][
 const embeddedTerminalRadio = document.querySelector('input[name="terminal-mode"][value="embedded"]');
 const systemTerminalSetting = document.querySelector("#system-terminal-setting");
 const webTerminalNote = document.querySelector("#web-terminal-note");
+const editorVersionLabel = document.querySelector("#editor-version-label");
+const runtimeVersionLabel = document.querySelector("#runtime-version-label");
+let wasmRuntimeVersion = "";
 const clearTerminalButton = document.querySelector("#clear-terminal-button");
 const windowControls = document.querySelector("#window-controls");
 const minimizeButton = document.querySelector("#minimize-button");
@@ -239,6 +247,33 @@ fontLigaturesInput.checked = settings.fontLigatures;
 embeddedTerminalRadio.checked = settings.terminalMode === "embedded";
 systemTerminalRadio.checked = electronBuild && settings.terminalMode === "system";
 updateTerminalShortcutHint();
+updateVersionLabels();
+
+function updateVersionLabels() {
+  if (editorVersionLabel) editorVersionLabel.textContent = `qwq-editor ${editorVersion || "unknown"}`;
+  if (!runtimeVersionLabel || electronBuild) return;
+  runtimeVersionLabel.hidden = !wasmRuntimeVersion;
+  runtimeVersionLabel.textContent = wasmRuntimeVersion
+    ? `qwqwq ${wasmRuntimeVersion} (WebAssembly)`
+    : "";
+}
+
+async function refreshRuntimeVersionLabel() {
+  if (!electronBuild || !runtimeVersionLabel) return;
+  if (typeof window.qwqDesktop?.getRuntimeVersion !== "function") {
+    runtimeVersionLabel.hidden = false;
+    runtimeVersionLabel.textContent = "qwqwq version unavailable";
+    return;
+  }
+  runtimeVersionLabel.hidden = false;
+  runtimeVersionLabel.textContent = "qwqwq …";
+  try {
+    const runtimeVersion = await window.qwqDesktop.getRuntimeVersion();
+    runtimeVersionLabel.textContent = runtimeVersion ? `qwqwq ${runtimeVersion}` : "qwqwq version unavailable";
+  } catch {
+    runtimeVersionLabel.textContent = "qwqwq version unavailable";
+  }
+}
 
 function readStorage(key, fallback) {
   try {
@@ -751,6 +786,10 @@ function startAnalysisWorker({ quiet = false } = {}) {
       const message = event.data;
       if (message.type === "ready") {
         workerReady = true;
+        if (typeof message.version === "string" && message.version) {
+          wasmRuntimeVersion = message.version;
+          updateVersionLabels();
+        }
         runButton.disabled = false;
         if (!quiet) setStatus("Checking…");
         void analyzeNow();
@@ -939,6 +978,12 @@ function handleTerminalEvent(event) {
 function updateCursor(position = editor?.getPosition()) {
   if (!position) return;
   document.querySelector("#cursor-position").textContent = `Line ${position.lineNumber}, column ${position.column}`;
+}
+
+function markRunResultStale(label = "Source changed") {
+  if (!runResultStatus.textContent) return;
+  setTerminalStatus(label, "stale");
+  if (!runSession?.running) appendTerminalText(`${label}. Run the program again to refresh the result.\n`, "stderr");
 }
 
 function isWaitingForWasmInput(result) {
@@ -1392,6 +1437,7 @@ function createEditor() {
     hoveredNavigationPosition = null;
     clearFlowHoverData(currentModel);
     currentRevision += 1;
+    markRunResultStale();
     monaco.editor.setModelMarkers(currentModel, "qwq", []);
     let file = getWorkspaceFile();
     if (!file && currentModel === emptyModel && instance.getValue().length > 0) {
@@ -1512,6 +1558,7 @@ function initializeTerminal() {
   terminal.open(terminalHost);
   terminal.onData(handleTerminalInput);
   terminal.attachCustomKeyEventHandler(handleTerminalShortcut);
+  terminal.write("Run a program to see its output here.\r\n");
 
   if (typeof ResizeObserver === "function") {
     terminalResizeObserver = new ResizeObserver(fitTerminal);
@@ -1564,6 +1611,7 @@ chooseRuntimeButton.addEventListener("click", async () => {
       runtimePathLabel.title = selectedPath;
       const filename = selectedPath.split(/[\\/]/).pop();
       setStatus(`Selected qwqwq runtime: ${filename}`, "success");
+      void refreshRuntimeVersionLabel();
     }
   } catch (error) {
     setStatus(`Could not set runtime: ${String(error?.message ?? error)}`, "error");
@@ -1580,6 +1628,7 @@ settingsButton.addEventListener("click", () => {
   systemTerminalRadio.checked = electronBuild && settings.terminalMode === "system";
   if (typeof settingsDialog.showModal === "function") settingsDialog.showModal();
   else settingsDialog.setAttribute("open", "");
+  void refreshRuntimeVersionLabel();
 });
 settingsClose.addEventListener("click", () => settingsDialog.close());
 settingsForm.addEventListener("submit", (event) => {
