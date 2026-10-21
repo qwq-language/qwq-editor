@@ -1,0 +1,271 @@
+name: Build Editor
+
+on:
+  push:
+    branches: [main]
+    tags: ["*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare-wasm:
+    name: Build WASM from latest qwqwq
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Check out qwq-editor
+        uses: actions/checkout@v7
+
+      - name: Check out latest qwqwq
+        uses: actions/checkout@v7
+        with:
+          repository: qwq-language/qwqwq
+          ref: main
+          path: qwqwq-source
+          fetch-depth: 1
+
+      - name: Read qwqwq version
+        id: version
+        shell: bash
+        run: |
+          version="$(sed -nE 's/.*kVersion = "([^"]+)".*/\1/p' qwqwq-source/src/include/version.hpp | head -n 1)"
+          if [[ -z "$version" ]]; then
+            echo "Could not read kVersion from qwqwq-source/src/include/version.hpp" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Emscripten
+        uses: emscripten-core/setup-emsdk@v15
+        with:
+          version: 5.0.1
+          actions-cache-folder: emsdk-cache
+
+      - name: Install editor dependencies
+        run: npm ci
+
+      - name: Build analysis-only WASM for desktop
+        run: npm run build:analysis-wasm:source
+        env:
+          QWQ_ROOT_DIR: ${{ github.workspace }}/qwqwq-source
+
+      - name: Build full WASM for online execution
+        run: npm run build:wasm:source
+        env:
+          QWQ_ROOT_DIR: ${{ github.workspace }}/qwqwq-source
+
+      - name: Stage WASM assets
+        shell: bash
+        run: |
+          mkdir -p wasm-assets/wasm wasm-assets/wasm-analysis
+          cp src/wasm/qwq.js src/wasm/qwq.wasm wasm-assets/wasm/
+          cp src/wasm-analysis/qwq.js src/wasm-analysis/qwq.wasm wasm-assets/wasm-analysis/
+
+      - name: Upload WASM assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: qwqwq-wasm-${{ steps.version.outputs.version }}
+          path: wasm-assets
+          if-no-files-found: error
+          retention-days: 1
+
+  desktop:
+    name: Package desktop app (${{ matrix.os }})
+    needs: prepare-wasm
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - name: Check out qwq-editor
+        uses: actions/checkout@v7
+
+      - name: Download latest WASM assets
+        uses: actions/download-artifact@v8
+        with:
+          name: qwqwq-wasm-${{ needs.prepare-wasm.outputs.version }}
+          path: src
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install editor dependencies
+        run: npm ci
+
+      - name: Build desktop app
+        run: npm run build:electron
+
+      - name: Set release-compatible artifact suffix
+        id: suffix
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Windows) suffix="x86_64-pc-windows-msvc-release" ;;
+            Linux) suffix="x86_64-unknown-linux-gnu-gcc-release" ;;
+            macOS) suffix="$(uname -m)-apple-darwin-appleclang-release" ;;
+            *) echo "Unsupported runner: $RUNNER_OS" >&2; exit 1 ;;
+          esac
+          echo "value=$suffix" >> "$GITHUB_OUTPUT"
+
+      - name: Package Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QWQ_VERSION: ${{ needs.prepare-wasm.outputs.version }}
+          ARTIFACT_SUFFIX: ${{ steps.suffix.outputs.value }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $installer = Get-ChildItem -Path release -Filter '*.exe' |
+            Where-Object { $_.Name -notlike '*.blockmap' } |
+            Select-Object -First 1
+          if (-not $installer) { throw 'Electron Builder did not produce a Windows installer.' }
+          $archiveName = "qwqwq-$env:QWQ_VERSION-$env:ARTIFACT_SUFFIX.zip"
+          Compress-Archive -LiteralPath $installer.FullName -DestinationPath "release-assets/$archiveName" -Force
+
+      - name: Package macOS/Linux installer
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          QWQ_VERSION: ${{ needs.prepare-wasm.outputs.version }}
+          ARTIFACT_SUFFIX: ${{ steps.suffix.outputs.value }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          archive="release-assets/qwqwq-${QWQ_VERSION}-${ARTIFACT_SUFFIX}.tar.gz"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            shopt -s nullglob
+            files=(release/*.AppImage)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "Electron Builder did not produce a Linux AppImage." >&2
+              exit 1
+            fi
+            tar -czf "$archive" -C release "${files[0]##*/}"
+          else
+            shopt -s nullglob
+            files=(release/*.dmg release/*.zip)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "Electron Builder did not produce macOS packages." >&2
+              exit 1
+            fi
+            basenames=()
+            for file in "${files[@]}"; do basenames+=("${file##*/}"); done
+            tar -czf "$archive" -C release "${basenames[@]}"
+          fi
+
+      - name: Upload desktop package
+        uses: actions/upload-artifact@v7
+        with:
+          name: qwqwq-${{ needs.prepare-wasm.outputs.version }}-${{ steps.suffix.outputs.value }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+
+  pages:
+    name: Deploy online editor with execution to GitHub Pages
+    needs: prepare-wasm
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Check out qwq-editor
+        uses: actions/checkout@v7
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v6
+
+      - name: Download latest full WASM
+        uses: actions/download-artifact@v8
+        with:
+          name: qwqwq-wasm-${{ needs.prepare-wasm.outputs.version }}
+          path: src
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install editor dependencies
+        run: npm ci
+
+      - name: Set GitHub Pages base path
+        shell: bash
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+        run: |
+          if [[ -z "$PAGES_BASE_PATH" || "$PAGES_BASE_PATH" == "/" ]]; then
+            echo "VITE_BASE_PATH=/" >> "$GITHUB_ENV"
+          else
+            echo "VITE_BASE_PATH=${PAGES_BASE_PATH%/}/" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build editor with online execution
+        run: npm run build:pages
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
+
+  release:
+    name: Attach desktop packages to the GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [prepare-wasm, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download desktop packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: qwqwq-${{ needs.prepare-wasm.outputs.version }}-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release packages
+        shell: bash
+        run: |
+          shopt -s nullglob
+          packages=(release-assets/*)
+          if [[ ${#packages[@]} -eq 0 ]]; then
+            echo "No desktop release packages were downloaded." >&2
+            exit 1
+          fi
+          ls -lh release-assets
+
+      - name: Attach packages to the GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

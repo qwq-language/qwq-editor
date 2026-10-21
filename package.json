@@ -1,0 +1,72 @@
+{
+  "name": "qwq-editor",
+  "private": true,
+  "version": "0.1.0",
+  "author": "qwq-language",
+  "type": "module",
+  "scripts": {
+    "build:wasm": "node scripts/ensure-wasm.cjs full",
+    "build:wasm:source": "node scripts/run-platform-script.cjs build-wasm",
+    "build:analysis-wasm": "node scripts/ensure-wasm.cjs analysis",
+    "build:analysis-wasm:source": "cross-env QWQ_ANALYZE_ONLY=1 QWQ_WASM_OUTPUT_DIR=src/wasm-analysis node scripts/run-platform-script.cjs build-wasm",
+    "predev": "node scripts/run-platform-script.cjs predev",
+    "dev": "vite --host 0.0.0.0",
+    "build": "npm run build:wasm && vite build",
+    "build:electron": "npm run build:analysis-wasm && vite build --mode electron && electron-builder --publish never",
+    "build:pages": "npm run build:wasm && vite build --mode pages",
+    "preelectron:dev": "npm run build:analysis-wasm",
+    "electron:dev": "node scripts/electron-dev.cjs",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "main": "electron/main.cjs",
+  "desktopName": "qwq-editor",
+  "build": {
+    "appId": "dev.qwq.editor",
+    "productName": "qwq-editor",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "icon": "public/app-icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "public/app-icon.ico"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "icon": "public/app-icon.png",
+      "syncDesktopName": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "devDependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "cross-env": "^10.1.0",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
+    "monaco-editor": "^0.57.0",
+    "vite": "^8.3.4"
+  }
+}
