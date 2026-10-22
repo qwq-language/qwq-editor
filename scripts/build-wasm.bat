@@ -59,7 +59,7 @@ em++ %SOURCES% %MODE_FLAG% ^
 if errorlevel 1 goto :build_failed
 
 echo Built %OUTPUT_DIR%\qwq.js
-if exist "%SCRIPT_DIR%write-wasm-version.cjs" node "%SCRIPT_DIR%write-wasm-version.cjs" "%ROOT_DIR%" "%OUTPUT_DIR%"
+node "%SCRIPT_DIR%wasm-version.cjs" --record "%ROOT_DIR%" "%OUTPUT_DIR%"
 popd
 exit /b 0
 

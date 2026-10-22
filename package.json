@@ -1,10 +1,13 @@
 {
   "name": "qwq-editor",
-  "private": true,
   "version": "0.2.1",
+  "description": "qwq language code editor",
   "author": "qwq-language",
-  "type": "module",
   "license": "MIT",
+  "homepage": "https://github.com/qwq-language/qwq-editor",
+  "private": true,
+  "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "build:wasm": "node scripts/ensure-wasm.cjs full",
     "build:wasm:source": "node scripts/run-platform-script.cjs build-wasm",
@@ -18,10 +21,20 @@
     "preelectron:dev": "npm run build:analysis-wasm",
     "electron:dev": "node scripts/electron-dev.cjs",
     "preview": "vite preview --host 0.0.0.0",
-    "wasm:version": "node scripts/wasm-version.cjs"
+    "wasm:version": "node scripts/wasm-version.cjs",
+    "pack:release": "node scripts/pack-release.cjs",
+    "release:assets": "node scripts/release-assets.cjs"
   },
-  "main": "electron/main.cjs",
-  "desktopName": "qwq-editor",
+  "devDependencies": {
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "7zip-bin": "^5.2.0",
+    "cross-env": "^10.1.0",
+    "electron": "^41.7.1",
+    "electron-builder": "^26.15.3",
+    "monaco-editor": "^0.57.0",
+    "vite": "^8.3.4"
+  },
   "build": {
     "appId": "dev.qwq.editor",
     "productName": "qwq-editor",
@@ -34,10 +47,13 @@
       "package.json"
     ],
     "asar": true,
+    "electronLanguages": [
+      "en-US",
+      "zh-CN"
+    ],
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        "dmg"
       ],
       "icon": "public/app-icon.icns"
     },
@@ -49,26 +65,27 @@
     },
     "linux": {
       "target": [
-        "AppImage"
+        "AppImage",
+        "deb"
       ],
       "icon": "public/app-icon.png",
+      "category": "Development",
+      "maintainer": "qwq-language",
+      "synopsis": "qwq language code editor",
       "syncDesktopName": true
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
       "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "shortcutName": "qwq-editor",
+      "installerIcon": "public/app-icon.ico",
+      "uninstallerIcon": "public/app-icon.ico",
+      "installerHeaderIcon": "public/app-icon.ico",
+      "deleteAppDataOnUninstall": false
     }
   },
-  "devDependencies": {
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "cross-env": "^10.1.0",
-    "electron": "^41.7.1",
-    "electron-builder": "^26.15.3",
-    "monaco-editor": "^0.57.0",
-    "vite": "^8.3.4"
-  }
+  "desktopName": "qwq-editor"
 }

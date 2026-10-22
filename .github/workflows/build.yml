@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      editor-version: ${{ steps.editor_version.outputs.version }}
     steps:
       - name: Check out qwq-editor
         uses: actions/checkout@v7
@@ -30,6 +31,17 @@ jobs:
           ref: main
           path: qwqwq-source
           fetch-depth: 1
+
+      - name: Read qwq-editor version
+        id: editor_version
+        shell: bash
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [[ -z "$version" ]]; then
+            echo "Could not read version from package.json" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Read qwqwq version
         id: version
@@ -86,7 +98,7 @@ jobs:
           if [[ -z "$COMMITTED_VERSION" ]]; then
             echo "::warning::The committed WASM snapshot does not report a version. Rebuild it with QWQ_REBUILD_WASM=1 and commit src/wasm and src/wasm-analysis."
           elif [[ "$COMMITTED_VERSION" != "$UPSTREAM_VERSION" ]]; then
-            echo "::warning::Committed WASM reports qwqwq $COMMITTED_VERSION but upstream main is $UPSTREAM_VERSION. Pages and the installers use $UPSTREAM_VERSION; rebuild the committed snapshot with QWQ_REBUILD_WASM=1 so local builds are not stale."
+            echo "::warning::Committed WASM reports qwqwq $COMMITTED_VERSION but upstream main is $UPSTREAM_VERSION. Pages and the release archives use $UPSTREAM_VERSION; rebuild the committed snapshot with QWQ_REBUILD_WASM=1 so local builds are not stale."
           else
             echo "Committed WASM matches upstream main ($UPSTREAM_VERSION)."
           fi
@@ -101,7 +113,7 @@ jobs:
       - name: Upload WASM assets
         uses: actions/upload-artifact@v7
         with:
-          name: qwqwq-wasm-${{ steps.version.outputs.version }}
+          name: qwq-editor-wasm-${{ steps.version.outputs.version }}
           path: wasm-assets
           if-no-files-found: error
           retention-days: 1
@@ -122,7 +134,7 @@ jobs:
       - name: Download latest WASM assets
         uses: actions/download-artifact@v8
         with:
-          name: qwqwq-wasm-${{ needs.prepare-wasm.outputs.version }}
+          name: qwq-editor-wasm-${{ needs.prepare-wasm.outputs.version }}
           path: src
 
       - name: Set up Node.js
@@ -149,56 +161,17 @@ jobs:
           esac
           echo "value=$suffix" >> "$GITHUB_OUTPUT"
 
-      - name: Package Windows installer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          QWQ_VERSION: ${{ needs.prepare-wasm.outputs.version }}
-          ARTIFACT_SUFFIX: ${{ steps.suffix.outputs.value }}
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
-          $installer = Get-ChildItem -Path release -Filter '*.exe' |
-            Where-Object { $_.Name -notlike '*.blockmap' } |
-            Select-Object -First 1
-          if (-not $installer) { throw 'Electron Builder did not produce a Windows installer.' }
-          $archiveName = "qwq-editor-$env:QWQ_VERSION-$env:ARTIFACT_SUFFIX.zip"
-          Compress-Archive -LiteralPath $installer.FullName -DestinationPath "release-assets/$archiveName" -Force
-
-      - name: Package macOS/Linux installer
-        if: runner.os != 'Windows'
+      - name: Collect release assets
         shell: bash
         env:
-          QWQ_VERSION: ${{ needs.prepare-wasm.outputs.version }}
           ARTIFACT_SUFFIX: ${{ steps.suffix.outputs.value }}
         run: |
-          set -euo pipefail
-          mkdir -p release-assets
-          archive="release-assets/qwq-editor-${QWQ_VERSION}-${ARTIFACT_SUFFIX}.tar.gz"
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            shopt -s nullglob
-            files=(release/*.AppImage)
-            if [[ ${#files[@]} -eq 0 ]]; then
-              echo "Electron Builder did not produce a Linux AppImage." >&2
-              exit 1
-            fi
-            tar -czf "$archive" -C release "${files[0]##*/}"
-          else
-            shopt -s nullglob
-            files=(release/*.dmg release/*.zip)
-            if [[ ${#files[@]} -eq 0 ]]; then
-              echo "Electron Builder did not produce macOS packages." >&2
-              exit 1
-            fi
-            basenames=()
-            for file in "${files[@]}"; do basenames+=("${file##*/}"); done
-            tar -czf "$archive" -C release "${basenames[@]}"
-          fi
+          node scripts/release-assets.cjs --suffix "$ARTIFACT_SUFFIX"
 
       - name: Upload desktop package
         uses: actions/upload-artifact@v7
         with:
-          name: qwq-editor-${{ needs.prepare-wasm.outputs.version }}-${{ steps.suffix.outputs.value }}
+          name: qwq-editor-${{ needs.prepare-wasm.outputs.editor-version }}-${{ steps.suffix.outputs.value }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 30
@@ -226,7 +199,7 @@ jobs:
       - name: Download latest full WASM
         uses: actions/download-artifact@v8
         with:
-          name: qwqwq-wasm-${{ needs.prepare-wasm.outputs.version }}
+          name: qwq-editor-wasm-${{ needs.prepare-wasm.outputs.version }}
           path: src
 
       - name: Set up Node.js
@@ -272,7 +245,7 @@ jobs:
       - name: Download desktop packages
         uses: actions/download-artifact@v8
         with:
-          pattern: qwq-editor-${{ needs.prepare-wasm.outputs.version }}-*
+          pattern: qwq-editor-${{ needs.prepare-wasm.outputs.editor-version }}-*
           path: release-assets
           merge-multiple: true
 

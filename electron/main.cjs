@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, protocol } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, protocol, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -213,16 +213,22 @@ function powershellQuote(value) {
 }
 
 
-function spawnSystemTerminal(command, args, cwd = undefined) {
+function spawnSystemTerminal(command, args, cwd = undefined, options = {}) {
+  const windows = process.platform === "win32";
   return new Promise((resolve, reject) => {
     let settled = false;
     let child;
     try {
       child = spawn(command, args, {
         cwd,
-        detached: process.platform !== "win32",
+        // `detached` on Windows implies DETACHED_PROCESS, which suppresses the new
+        // console window. Console windows there are created by `start` or by the
+        // console subsystem itself, so the process stays attached and is unref'd.
+        detached: !windows,
         stdio: "ignore",
-        windowsHide: process.platform === "win32",
+        windowsHide: false,
+        windowsVerbatimArguments: windows && options.verbatim === true,
+        env: options.env ?? process.env,
       });
     } catch (error) {
       reject(error);
@@ -247,6 +253,89 @@ function spawnSystemTerminal(command, args, cwd = undefined) {
   });
 }
 
+function windowsPowerShellPath() {
+  return findInPath("powershell.exe")
+    || path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
+
+function windowsTerminalPath() {
+  const localAppData = process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local");
+  return findInPath("wt.exe") || path.join(localAppData, "Microsoft", "WindowsApps", "wt.exe");
+}
+
+// The launcher script stays pure ASCII and receives every path through the
+// environment: Windows PowerShell 5.1 reads .ps1 files using the ANSI code page,
+// so an inline UTF-8 path such as C:\\Users\\<non-ASCII> would corrupt the script.
+function windowsLauncherScript() {
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    "try { $Host.UI.RawUI.WindowTitle = 'qwq-editor' } catch {}",
+    "Write-Host 'qwq-editor: running the installed qwqwq executable.'",
+    "& $env:QWQ_EDITOR_EXE --max-steps 1000000 $env:QWQ_EDITOR_SOURCE",
+    "$qwqStatus = $LASTEXITCODE",
+    "if ($null -eq $qwqStatus) { $qwqStatus = 0 }",
+    "Write-Host ''",
+    "Write-Host ('qwqwq exited with status ' + $qwqStatus + '.')",
+    "[void](Read-Host 'Press Enter to close this terminal')",
+    "try { Remove-Item -LiteralPath $env:QWQ_EDITOR_TEMP -Recurse -Force -ErrorAction Stop } catch {}",
+    "exit $qwqStatus",
+    "",
+  ].join("\r\n");
+}
+
+async function startWindowsSystemTerminal(executable, sourcePath, temporaryDirectory) {
+  const launcherPath = path.join(temporaryDirectory, "run.ps1");
+  await fsp.writeFile(launcherPath, windowsLauncherScript(), "utf8");
+  const env = {
+    ...process.env,
+    QWQ_EDITOR_EXE: executable,
+    QWQ_EDITOR_SOURCE: sourcePath,
+    QWQ_EDITOR_TEMP: temporaryDirectory,
+  };
+  const powershell = windowsPowerShellPath();
+  const powershellArgs = ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcherPath];
+  const failures = [];
+
+  const windowsTerminal = windowsTerminalPath();
+  if (fs.existsSync(windowsTerminal)) {
+    try {
+      await spawnSystemTerminal(
+        windowsTerminal,
+        ["new-tab", "--title", "qwq-editor", powershell, ...powershellArgs],
+        temporaryDirectory,
+        { env },
+      );
+      return { terminal: "Windows Terminal" };
+    } catch (error) {
+      failures.push(`Windows Terminal: ${String(error?.message ?? error)}`);
+    }
+  }
+
+  // `start` is what actually asks Windows for a fresh console window; the command
+  // line is passed verbatim so cmd.exe does not re-quote (and corrupt) the paths.
+  const commandProcessor = findInPath("cmd.exe")
+    || path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
+  const commandLine = `start "" "${powershell}" ${powershellArgs.map((argument) => `"${argument}"`).join(" ")}`;
+  try {
+    await spawnSystemTerminal(commandProcessor, ["/d", "/s", "/c", commandLine], temporaryDirectory, {
+      verbatim: true,
+      env,
+    });
+    return { terminal: "Windows Console" };
+  } catch (error) {
+    failures.push(`Windows Console: ${String(error?.message ?? error)}`);
+  }
+
+  try {
+    await spawnSystemTerminal(powershell, powershellArgs, temporaryDirectory, { env });
+    return { terminal: "PowerShell" };
+  } catch (error) {
+    failures.push(`PowerShell: ${String(error?.message ?? error)}`);
+  }
+
+  throw new Error(`No system terminal could be started (${failures.join("; ")}).`);
+}
+
 async function startSystemTerminal(source) {
   if (typeof source !== "string") throw new Error("Source code must be text.");
   if (source.length > MAX_SOURCE_CHARS) throw new Error("The source file is too large to run.");
@@ -261,37 +350,7 @@ async function startSystemTerminal(source) {
 
   try {
     if (process.platform === "win32") {
-      const powershell = findInPath("powershell.exe") || path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-      const launcherPath = path.join(temporaryDirectory, "run.ps1");
-      const script = [
-        "$ErrorActionPreference = 'Continue'",
-        `& ${powershellQuote(executable)} --max-steps 1000000 ${powershellQuote(sourcePath)}`,
-        "$qwqExitCode = $LASTEXITCODE",
-        "Write-Host ''",
-        "Write-Host ('qwqwq exited with status ' + $qwqExitCode + '.')",
-        "Read-Host 'Press Enter to close this terminal'",
-        `Remove-Item -LiteralPath ${powershellQuote(temporaryDirectory)} -Recurse -Force -ErrorAction SilentlyContinue`,
-        "exit $qwqExitCode",
-      ].join("\r\n");
-      await fsp.writeFile(launcherPath, script, "utf8");
-
-      const windowsTerminal = findInPath("wt.exe");
-      if (windowsTerminal) {
-        try {
-          await spawnSystemTerminal(windowsTerminal, [
-            "-w", "new", "new-tab", "--title", "qwq-editor",
-            powershell, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", launcherPath,
-          ], temporaryDirectory);
-          return { terminal: "Windows Terminal" };
-        } catch {
-          // Fall back to the Windows Console if Windows Terminal cannot be launched.
-        }
-      }
-
-      const commandProcessor = findInPath("cmd.exe") || path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
-      const command = `start "" "${powershell}" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "${launcherPath}"`;
-      await spawnSystemTerminal(commandProcessor, ["/d", "/s", "/c", command], temporaryDirectory);
-      return { terminal: "Windows Console" };
+      return await startWindowsSystemTerminal(executable, sourcePath, temporaryDirectory);
     }
 
     const bash = findInPath("bash") || "/bin/bash";
@@ -580,6 +639,12 @@ ipcMain.handle("qwq:choose-runtime", async (event) => {
   await fsp.mkdir(path.dirname(settingsFile), { recursive: true });
   await fsp.writeFile(settingsFile, JSON.stringify(settings, null, 2), "utf8");
   return selectedPath;
+});
+
+ipcMain.handle("qwq:open-external", async (event, url) => {
+  if (getWindowForSender(event.sender) !== mainWindow) throw new Error("Invalid editor window.");
+  if (typeof url !== "string" || !/^https:\/\//.test(url)) throw new Error("Only https links can be opened.");
+  await shell.openExternal(url);
 });
 
 ipcMain.handle("qwq:window-control", async (event, action) => {

@@ -124,7 +124,6 @@ document.querySelector("#app").innerHTML = `
               <span id="run-result-status" class="terminal-status"></span>
               <span class="terminal-toolbar-spacer"></span>
               <button class="terminal-action" id="clear-terminal-button" type="button">Clear</button>
-              <span class="terminal-shortcuts" id="terminal-shortcut-hint" title="Keyboard controls depend on the selected terminal">Ctrl+Z EOF · Ctrl+C interrupt</span>
             </div>
             <div id="terminal-host" class="terminal-host" role="application" aria-label="Interactive terminal"></div>
             <div id="run-diagnostics"></div>
@@ -172,9 +171,15 @@ document.querySelector("#app").innerHTML = `
         <legend>Runtime terminal</legend>
         <label class="radio-setting"><input type="radio" name="terminal-mode" value="embedded" /><span>Embedded terminal</span></label>
         <label class="radio-setting" id="system-terminal-setting"><input type="radio" name="terminal-mode" value="system" /><span>System terminal</span></label>
-        <p class="setting-help" id="system-terminal-note">Native key behavior applies: Ctrl+C interrupts. Ctrl+Z suspends on macOS/Linux (resume with <code>fg</code>); use Ctrl+D for EOF. On Windows, Ctrl+Z then Enter sends EOF.</p>
         <p class="setting-help" id="web-terminal-note" hidden>Web builds always use the embedded terminal.</p>
       </fieldset>
+      <div class="settings-section update-setting">
+        <div class="runtime-setting-row">
+          <div><span class="runtime-setting-label">Updates</span><p class="setting-help" id="update-status">Current version</p></div>
+          <button class="secondary-button" id="check-updates-button" type="button">Check for updates</button>
+        </div>
+        <p class="runtime-path" id="latest-release-label" hidden></p>
+      </div>
       <div class="version-line">
         <span id="editor-version-label">qwq-editor</span>
         <span id="runtime-version-label" hidden></span>
@@ -203,8 +208,6 @@ const runButton = document.querySelector("#run-button");
 const runtimeSetting = document.querySelector("#runtime-setting");
 const chooseRuntimeButton = document.querySelector("#choose-runtime-button");
 const runtimePathLabel = document.querySelector("#runtime-path-label");
-const terminalShortcutHint = document.querySelector("#terminal-shortcut-hint");
-const systemTerminalNote = document.querySelector("#system-terminal-note");
 const fileInput = document.querySelector("#file-input");
 const newFileButton = document.querySelector("#new-file-button");
 const explorerOpenButton = document.querySelector("#explorer-open-button");
@@ -222,6 +225,9 @@ const systemTerminalRadio = document.querySelector('input[name="terminal-mode"][
 const embeddedTerminalRadio = document.querySelector('input[name="terminal-mode"][value="embedded"]');
 const systemTerminalSetting = document.querySelector("#system-terminal-setting");
 const webTerminalNote = document.querySelector("#web-terminal-note");
+const checkUpdatesButton = document.querySelector("#check-updates-button");
+const updateStatus = document.querySelector("#update-status");
+const latestReleaseLabel = document.querySelector("#latest-release-label");
 const editorVersionLabel = document.querySelector("#editor-version-label");
 const runtimeVersionLabel = document.querySelector("#runtime-version-label");
 let wasmRuntimeVersion = "";
@@ -237,7 +243,6 @@ if (electronBuild) {
 } else {
   systemTerminalSetting.classList.add("disabled-setting");
   systemTerminalRadio.disabled = true;
-  systemTerminalNote.hidden = true;
   webTerminalNote.hidden = false;
 }
 
@@ -246,7 +251,6 @@ secondaryFontInput.value = settings.secondaryFont;
 fontLigaturesInput.checked = settings.fontLigatures;
 embeddedTerminalRadio.checked = settings.terminalMode === "embedded";
 systemTerminalRadio.checked = electronBuild && settings.terminalMode === "system";
-updateTerminalShortcutHint();
 updateVersionLabels();
 
 function updateVersionLabels() {
@@ -476,30 +480,6 @@ function applyEditorFont() {
   if (terminal) terminal.options.fontFamily = fontFamily;
 }
 
-function isWindowsPlatform() {
-  const platform = navigator.userAgentData?.platform || navigator.platform || "";
-  return /windows/i.test(platform);
-}
-
-function systemTerminalKeyHelp() {
-  return isWindowsPlatform()
-    ? "Ctrl+C interrupts; Ctrl+Z then Enter sends EOF."
-    : "Ctrl+C interrupts; Ctrl+Z suspends (resume with fg); Ctrl+D sends EOF.";
-}
-
-function updateTerminalShortcutHint() {
-  if (!terminalShortcutHint) return;
-  if (electronBuild && settings.terminalMode === "system") {
-    terminalShortcutHint.textContent = isWindowsPlatform()
-      ? "System: Ctrl+C interrupt · Ctrl+Z, Enter EOF"
-      : "System: Ctrl+C interrupt · Ctrl+Z suspend · Ctrl+D EOF";
-    terminalShortcutHint.title = systemTerminalKeyHelp();
-  } else {
-    terminalShortcutHint.textContent = "Ctrl+Z EOF · Ctrl+C interrupt";
-    terminalShortcutHint.title = "Ctrl+Z sends EOF; Ctrl+C stops the program.";
-  }
-}
-
 function updateSettingsFromDialog() {
   settings = {
     primaryFont: primaryFontInput.value.trim() || defaultSettings.primaryFont,
@@ -512,7 +492,6 @@ function updateSettingsFromDialog() {
   fontLigaturesInput.checked = settings.fontLigatures;
   persistSettings();
   applyEditorFont();
-  updateTerminalShortcutHint();
 }
 
 function renderFileTabs() {
@@ -1344,7 +1323,7 @@ async function runProgram() {
         }
         const result = await window.qwqDesktop.openTerminal(source);
         const terminalName = result?.terminal || "system terminal";
-        appendTerminalText(`Opened ${terminalName}. ${systemTerminalKeyHelp()}\n`);
+        appendTerminalText(`Opened ${terminalName}\n`);
         finishRunSession({ success: true, message: `Opened ${terminalName}` });
       } else {
         if (typeof window.qwqDesktop?.startRun !== "function") {
@@ -1417,12 +1396,7 @@ function createEditor() {
     hideCursorInOverviewRuler: true,
     smoothScrolling: true,
     cursorBlinking: "smooth",
-    occurrencesHighlight: "off",
-    selectionHighlight: false,
-    quickSuggestions: false,
-    suggestOnTriggerCharacters: false,
-    wordBasedSuggestions: "off",
-    parameterHints: { enabled: false },
+    selectionHighlight: true,
     hover: { enabled: true, delay: 350, sticky: true },
     contextmenu: true,
     scrollbar: {
@@ -1503,9 +1477,16 @@ function createEditor() {
   instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => { void saveCurrentFile(); });
   instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyN, createNewFile);
   instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyO, () => { void openCurrentFile(); });
-  instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-    void runProgram();
-  });
+  for (const key of [monaco.KeyCode.Enter, monaco.KeyCode.F5, monaco.KeyCode.F11]) {
+    instance.addCommand(monaco.KeyMod.CtrlCmd | key, () => {
+      if (workerReady) void runProgram();
+    });
+    if (key !== monaco.KeyCode.Enter) {
+      instance.addCommand(key, () => {
+        if (workerReady) void runProgram();
+      });
+    }
+  }
   return instance;
 }
 
@@ -1620,6 +1601,67 @@ chooseRuntimeButton.addEventListener("click", async () => {
   }
 });
 
+const releasesUrl = "https://github.com/qwq-language/qwq-editor/releases/latest";
+
+function compareVersions(left, right) {
+  const parse = (value) => String(value).replace(/^v/i, "").split(/[.+-]/).map((part) => Number.parseInt(part, 10) || 0);
+  const first = parse(left);
+  const second = parse(right);
+  for (let index = 0; index < Math.max(first.length, second.length); index += 1) {
+    const difference = (first[index] ?? 0) - (second[index] ?? 0);
+    if (difference !== 0) return difference > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+async function checkForUpdates() {
+  checkUpdatesButton.disabled = true;
+  updateStatus.textContent = "Checking…";
+  try {
+    const response = await fetch("https://api.github.com/repos/qwq-language/qwq-editor/releases/latest", {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+    const release = await response.json();
+    const tag = String(release.tag_name ?? "").trim();
+    if (!tag) throw new Error("The latest release has no tag");
+    const comparison = compareVersions(tag, editorVersion);
+    latestReleaseLabel.hidden = false;
+    latestReleaseLabel.textContent = release.html_url || releasesUrl;
+    if (comparison > 0) {
+      updateStatus.textContent = `Latest release: ${tag}`;
+      checkUpdatesButton.textContent = "Open release";
+      checkUpdatesButton.dataset.openRelease = "true";
+    } else {
+      updateStatus.textContent = `Up to date (latest ${tag})`;
+      checkUpdatesButton.textContent = "Open releases";
+      checkUpdatesButton.dataset.openRelease = "false";
+    }
+  } catch (error) {
+    updateStatus.textContent = `Could not check: ${String(error?.message ?? error)}`;
+    checkUpdatesButton.textContent = "Open releases";
+    checkUpdatesButton.dataset.openRelease = "false";
+  } finally {
+    checkUpdatesButton.disabled = false;
+  }
+}
+
+function openLatestRelease() {
+  const url = latestReleaseLabel.hidden || !latestReleaseLabel.textContent
+    ? releasesUrl
+    : latestReleaseLabel.textContent;
+  if (electronBuild && typeof window.qwqDesktop?.openExternal === "function") {
+    void window.qwqDesktop.openExternal(url);
+    return;
+  }
+  window.open(url, "_blank", "noopener");
+}
+
+checkUpdatesButton.addEventListener("click", () => {
+  if (checkUpdatesButton.dataset.openRelease) openLatestRelease();
+  else void checkForUpdates();
+});
+
 settingsButton.addEventListener("click", () => {
   primaryFontInput.value = settings.primaryFont;
   secondaryFontInput.value = settings.secondaryFont;
@@ -1652,13 +1694,11 @@ embeddedTerminalRadio.addEventListener("change", () => {
   if (!embeddedTerminalRadio.checked) return;
   settings.terminalMode = "embedded";
   persistSettings();
-  updateTerminalShortcutHint();
 });
 systemTerminalRadio.addEventListener("change", () => {
   if (!electronBuild || !systemTerminalRadio.checked) return;
   settings.terminalMode = "system";
   persistSettings();
-  updateTerminalShortcutHint();
 });
 resetSettingsButton.addEventListener("click", () => {
   settings = { ...defaultSettings };
@@ -1669,7 +1709,6 @@ resetSettingsButton.addEventListener("click", () => {
   systemTerminalRadio.checked = false;
   persistSettings();
   applyEditorFont();
-  updateTerminalShortcutHint();
 });
 settingsDialog.addEventListener("click", (event) => {
   if (event.target === settingsDialog) settingsDialog.close();

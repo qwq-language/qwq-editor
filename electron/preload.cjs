@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld("qwqDesktop", Object.freeze({
   getRuntimePath: () => ipcRenderer.invoke("qwq:get-runtime-path"),
   getRuntimeVersion: () => ipcRenderer.invoke("qwq:get-runtime-version"),
   chooseRuntime: () => ipcRenderer.invoke("qwq:choose-runtime"),
+  openExternal: (url) => ipcRenderer.invoke("qwq:open-external", url),
   minimize: () => ipcRenderer.invoke("qwq:window-control", "minimize"),
   toggleMaximize: () => ipcRenderer.invoke("qwq:window-control", "toggle-maximize"),
   closeWindow: () => ipcRenderer.invoke("qwq:window-control", "close"),

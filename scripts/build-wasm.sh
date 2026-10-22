@@ -71,6 +71,4 @@ em++ "${SOURCES[@]}" "${MODE_FLAGS[@]}" \
 
 printf 'Built %s\n' "$OUTPUT_DIR/qwq.js"
 
-if [[ -f "$SCRIPT_DIR/write-wasm-version.cjs" ]]; then
-  node "$SCRIPT_DIR/write-wasm-version.cjs" "$ROOT_DIR" "$OUTPUT_DIR"
-fi
+node "$SCRIPT_DIR/wasm-version.cjs" --record "$ROOT_DIR" "$OUTPUT_DIR"

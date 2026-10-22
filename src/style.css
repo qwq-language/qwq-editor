@@ -121,7 +121,6 @@ button { color: inherit; }
 .monaco-editor .view-lines .qwq-token.qwq-operator { color: #d4d4d4 !important; }
 .monaco-editor .view-lines .qwq-token.qwq-connector { color: #c586c0 !important; font-weight: 500; }
 .monaco-editor .view-lines .qwq-token.qwq-keyword { color: #569cd6 !important; }
-.monaco-editor .view-lines .qwq-token.qwq-bracket { color: #ffd700 !important; }
 .monaco-editor .view-lines .qwq-token.qwq-punctuation { color: #d4d4d4 !important; }
 .monaco-editor .view-lines .qwq-token.qwq-template-angle { color: #dcdcaa !important; font-weight: 600; }
 .monaco-editor .view-lines .qwq-token.qwq-template-parameter { color: #4ec9b0 !important; }
@@ -159,7 +158,6 @@ button { color: inherit; }
 .terminal-status.error { color: #e18b8b; }
 .terminal-status.stale { color: #8e9baa; }
 .terminal-toolbar-spacer { flex: 1; }
-.terminal-shortcuts { overflow: hidden; color: #737c86; font-family: Consolas, "微软雅黑", monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .terminal-action { height: 22px; padding: 0 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #8996a3; font-size: 9px; cursor: pointer; }
 .terminal-action:hover:not(:disabled) { border-color: rgba(255,255,255,.1); color: #dce5ef; }
 .terminal-action.danger { color: #d99191; }
@@ -233,7 +231,6 @@ button { color: inherit; }
   .editor-tab { min-width: 90px; max-width: 150px; }
   .terminal-toolbar { gap: 5px; padding: 0 7px; }
   .terminal-action { padding: 0 5px; font-size: 8px; }
-  .terminal-shortcuts { max-width: 46%; font-size: 8px; }
   .terminal-host { padding: 6px 8px; }
   .panel-header { padding: 0 12px; }
   .diagnostics-panel { padding-right: 10px; padding-left: 10px; }

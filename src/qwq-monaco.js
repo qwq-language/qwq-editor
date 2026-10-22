@@ -380,38 +380,37 @@ function originsMessage(sources, descriptions) {
     .map((id) => descriptions.get(id))
     .filter(Boolean)
     .sort((first, second) => first.index - second.index);
-  if (entries.length === 0) return "- No tracked source";
-
   return entries.map((entry) => {
-    const spelling = entry.spelling
-      ? ` · ${markdownCode(entry.spelling.length > 48 ? `${entry.spelling.slice(0, 45)}…` : entry.spelling)}`
-      : "";
-    return `- **${entry.kind}**${spelling}  \n  Line ${entry.lineNumber} · column ${entry.column}`;
-  }).join("\n");
+    const spelling = entry.spelling ? ` · ${markdownCode(entry.spelling)}` : "";
+    return `${entry.kind}${spelling}\n\nLine ${entry.lineNumber} · column ${entry.column}`;
+  }).join("\n\n");
+}
+
+// `getLeft([q]_q_(q_q) -> [q]_q)` and `~([q]_q_(q_q) -> [q]_q_(q_q))` both
+// reduce to the signature itself, without the name or the wrapping parens.
+function signatureText(text) {
+  const value = String(text ?? "").trim();
+  const match = value.match(/^[^\s()]+\(([\s\S]*)\)$/);
+  if (!match) return value;
+  let depth = 0;
+  for (const character of match[1]) {
+    if (character === "(") depth += 1;
+    else if (character === ")" && --depth < 0) return value;
+  }
+  return depth === 0 ? match[1].trim() : value;
 }
 
 function hoverMessageForSources(sources, descriptions, signatures = []) {
   if (signatures.length > 0) {
-    const title = signatures.length === 1 ? "Resolved signature" : "Resolved signatures";
-    return {
-      value: `**${title}**\n\n${signatures.map((signature) => markdownCode(signature.text)).join("\n")}`,
-      isTrusted: false,
-      supportHtml: false,
-    };
+    const lines = [...new Set(signatures.map((signature) => signatureText(signature.text)))].filter(Boolean);
+    if (lines.length > 0) {
+      return { value: lines.map((line) => markdownCode(line)).join("\n"), isTrusted: false, supportHtml: false };
+    }
   }
 
-  const entries = [...new Set(sources ?? [])]
-    .map((id) => descriptions.get(id))
-    .filter(Boolean)
-    .sort((first, second) => first.index - second.index);
-  if (entries.length === 0) return undefined;
-
-  const title = entries.length === 1 ? "Value source" : `Value sources (${entries.length})`;
-  return {
-    value: `**${title}**\n\n${originsMessage(sources, descriptions)}`,
-    isTrusted: false,
-    supportHtml: false,
-  };
+  const message = originsMessage(sources, descriptions);
+  if (!message) return undefined;
+  return { value: message, isTrusted: false, supportHtml: false };
 }
 
 export function decorationsForAnalysis(result, source, model) {
@@ -453,6 +452,8 @@ export function decorationsForAnalysis(result, source, model) {
     toUtf16(origin.anchor),
   ]));
   const hoverRanges = [];
+  const bracketGroups = [];
+  const groupedTokens = new Set();
   for (let index = 0; index < tokens.length; index += 1) {
     if (tokens[index].kind !== "LeftBracket") continue;
     let depth = 1;
@@ -472,6 +473,7 @@ export function decorationsForAnalysis(result, source, model) {
       for (const id of data?.colorSources ?? []) groupColorSources.add(id);
     }
     if (groupSources.size > 0) {
+      for (let item = index; item <= closingIndex; item += 1) groupedTokens.add(item);
       for (let item = index; item <= closingIndex; item += 1) {
         if (tokens[item].kind === "Comment") continue;
         const key = `${tokens[item].start}:${tokens[item].end}`;
@@ -484,23 +486,38 @@ export function decorationsForAnalysis(result, source, model) {
         for (const id of groupColorSources) data.colorSources.add(id);
         flowByRange.set(key, data);
       }
+      const groupSignatures = [];
+      for (let item = index; item <= closingIndex; item += 1) {
+        const data = flowByRange.get(`${tokens[item].start}:${tokens[item].end}`);
+        for (const signature of data?.signatures ?? []) {
+          if (!groupSignatures.some((existing) => existing.text === signature.text)) groupSignatures.push(signature);
+        }
+      }
+      bracketGroups.push({
+        from: tokens[index].start,
+        to: tokens[closingIndex].end,
+        sources: [...groupSources],
+        signatures: groupSignatures,
+      });
     }
     index = closingIndex;
   }
 
   for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex += 1) {
     const token = tokens[tokenIndex];
-    const style = styleForToken(token.kind);
-    if (!style) continue;
     const from = toUtf16(token.start);
     const to = toUtf16(token.end);
     if (from == null || to == null || to <= from) continue;
+    const style = styleForToken(token.kind);
+    if (!style) continue;
     const flow = flowByRange.get(`${token.start}:${token.end}`);
     const sources = [...(flow?.sources ?? [])];
     const colorSources = [...(flow?.colorSources ?? [])];
     const sourceClass = flowClassesFor(colorSources, originIndex);
     const signatures = [...(flow?.signatures ?? [])];
-    const hoverMessage = hoverMessageForSources(sources, descriptions, signatures);
+    const hoverMessage = groupedTokens.has(tokenIndex)
+      ? undefined
+      : hoverMessageForSources(sources, descriptions, signatures);
     const templateClasses = [];
     if (templateStyles.angles.has(tokenIndex)) templateClasses.push("qwq-template-angle");
     if (templateStyles.parameters.has(tokenIndex)) templateClasses.push("qwq-template-parameter");
@@ -527,9 +544,26 @@ export function decorationsForAnalysis(result, source, model) {
         : null;
       hoverRanges.push({ start: from, end: to, message: hoverMessage, navigation });
     }
+    if (!classes) continue;
     decorations.push({
       range,
       options: { inlineClassName: classes },
+    });
+  }
+
+  // `[q]` reads as one unit: a single hover over the whole group instead of one per character.
+  for (const group of bracketGroups) {
+    const message = hoverMessageForSources(group.sources, descriptions, group.signatures);
+    if (!message) continue;
+    const from = toUtf16(group.from);
+    const to = toUtf16(group.to);
+    if (from == null || to == null || to <= from) continue;
+    const targets = [...new Set(group.sources.map((id) => originOffsets.get(id)).filter((offset) => offset != null))];
+    hoverRanges.push({
+      start: from,
+      end: to,
+      message,
+      navigation: targets.length > 0 ? { kind: "source", targets } : null,
     });
   }
 

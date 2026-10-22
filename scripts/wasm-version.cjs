@@ -1,6 +1,27 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { execFileSync } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
+
+// Records provenance for a freshly built WASM directory: the version from
+// version.hpp plus the source commit, without touching the qwqwq tree.
+function record(rootDir, outputDir) {
+  const version = fs.readFileSync(path.join(rootDir, "src", "include", "version.hpp"), "utf8").match(/kVersion\s*=\s*"([^"]+)"/)?.[1];
+  if (!version) {
+    console.error("Could not read kVersion from version.hpp");
+    process.exit(1);
+  }
+  let commit = "";
+  try {
+    commit = execFileSync("git", ["-C", rootDir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+  } catch {}
+  fs.mkdirSync(outputDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(outputDir, "version.json"),
+    `${JSON.stringify({ qwqwqVersion: version, qwqwqCommit: commit, builtAt: new Date().toISOString() }, null, 2)}\n`,
+  );
+  console.log(`Recorded qwqwq ${version} for ${path.relative(process.cwd(), outputDir)}`);
+}
 
 // Prints the qwqwq version of a WASM build directory.
 // The value comes from the compiled binary's qwq_version export; when a build
@@ -26,6 +47,8 @@ async function readBinaryVersion(moduleDir) {
 
 async function main() {
   const args = process.argv.slice(2);
+  if (args[0] === "--record") return record(path.resolve(args[1] ?? "."), path.resolve(args[2] ?? "src/wasm"));
+
   const asJson = args.includes("--json");
   const moduleDir = path.resolve(args.find((arg) => !arg.startsWith("--")) ?? "src/wasm");
 
