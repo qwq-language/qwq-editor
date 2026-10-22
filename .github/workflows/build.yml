@@ -161,17 +161,55 @@ jobs:
           esac
           echo "value=$suffix" >> "$GITHUB_OUTPUT"
 
-      - name: Collect release assets
+      - name: Package Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          QWQ_VERSION: ${{ needs.prepare-wasm.outputs.version }}
+          ARTIFACT_SUFFIX: ${{ steps.suffix.outputs.value }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          $installer = Get-ChildItem -Path release -Filter '*.exe' |
+            Where-Object { $_.Name -notlike '*.blockmap' } |
+            Select-Object -First 1
+          if (-not $installer) { throw 'Electron Builder did not produce a Windows installer.' }
+          $archiveName = "qwqwq-$env:QWQ_VERSION-$env:ARTIFACT_SUFFIX.zip"
+          Compress-Archive -LiteralPath $installer.FullName -DestinationPath "release-assets/$archiveName" -Force
+
+      - name: Package macOS/Linux installer
+        if: runner.os != 'Windows'
         shell: bash
         env:
           ARTIFACT_SUFFIX: ${{ steps.suffix.outputs.value }}
         run: |
-          node scripts/release-assets.cjs --suffix "$ARTIFACT_SUFFIX"
+          set -euo pipefail
+          mkdir -p release-assets
+          archive="release-assets/qwqwq-${QWQ_VERSION}-${ARTIFACT_SUFFIX}.tar.gz"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            shopt -s nullglob
+            files=(release/*.AppImage)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "Electron Builder did not produce a Linux AppImage." >&2
+              exit 1
+            fi
+            tar -czf "$archive" -C release "${files[0]##*/}"
+          else
+            shopt -s nullglob
+            files=(release/*.dmg release/*.zip)
+            if [[ ${#files[@]} -eq 0 ]]; then
+              echo "Electron Builder did not produce macOS packages." >&2
+              exit 1
+            fi
+            basenames=()
+            for file in "${files[@]}"; do basenames+=("${file##*/}"); done
+            tar -czf "$archive" -C release "${basenames[@]}"
+          fi
 
       - name: Upload desktop package
         uses: actions/upload-artifact@v7
         with:
-          name: qwq-editor-${{ needs.prepare-wasm.outputs.editor-version }}-${{ steps.suffix.outputs.value }}
+          name: qwqwq-${{ needs.prepare-wasm.outputs.version }}-${{ steps.suffix.outputs.value }}
           path: release-assets/*
           if-no-files-found: error
           retention-days: 30
@@ -245,7 +283,7 @@ jobs:
       - name: Download desktop packages
         uses: actions/download-artifact@v8
         with:
-          pattern: qwq-editor-${{ needs.prepare-wasm.outputs.editor-version }}-*
+          pattern: qwqwq-${{ needs.prepare-wasm.outputs.version }}-*
           path: release-assets
           merge-multiple: true
 
