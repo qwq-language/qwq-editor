@@ -959,12 +959,6 @@ function updateCursor(position = editor?.getPosition()) {
   document.querySelector("#cursor-position").textContent = `Line ${position.lineNumber}, column ${position.column}`;
 }
 
-function markRunResultStale(label = "Source changed") {
-  if (!runResultStatus.textContent) return;
-  setTerminalStatus(label, "stale");
-  if (!runSession?.running) appendTerminalText(`${label}. Run the program again to refresh the result.\n`, "stderr");
-}
-
 function isWaitingForWasmInput(result) {
   return (result.diagnostics ?? []).some((diagnostic) =>
     diagnostic.phase === "runtime" && diagnostic.message.includes("from the input stream, but the input ended"));
@@ -1411,7 +1405,6 @@ function createEditor() {
     hoveredNavigationPosition = null;
     clearFlowHoverData(currentModel);
     currentRevision += 1;
-    markRunResultStale();
     monaco.editor.setModelMarkers(currentModel, "qwq", []);
     let file = getWorkspaceFile();
     if (!file && currentModel === emptyModel && instance.getValue().length > 0) {

@@ -156,7 +156,6 @@ button { color: inherit; }
 .terminal-status.working { color: #d1b57f; }
 .terminal-status.success { color: #83bd96; }
 .terminal-status.error { color: #e18b8b; }
-.terminal-status.stale { color: #8e9baa; }
 .terminal-toolbar-spacer { flex: 1; }
 .terminal-action { height: 22px; padding: 0 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: #8996a3; font-size: 9px; cursor: pointer; }
 .terminal-action:hover:not(:disabled) { border-color: rgba(255,255,255,.1); color: #dce5ef; }
